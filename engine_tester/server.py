@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import logging
+import sys
 from typing import List
 
 from fastapi import FastAPI, HTTPException, Query
@@ -7,6 +10,20 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import AnyHttpUrl, BaseModel
 
 from .processor import ProcessingError, ProcessSummary, relay_requests, resolve_directory
+
+
+def _configure_utf8_stdio() -> None:
+    """Force stdout/stderr to use UTF-8 so exception text renders correctly."""
+
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
+_configure_utf8_stdio()
+
+logging.basicConfig(level=logging.INFO, encoding="utf-8")
+
 
 app = FastAPI(title="Engine Tester", version="0.1.0")
 

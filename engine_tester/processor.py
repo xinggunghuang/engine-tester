@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
+import re
 from typing import Iterable, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -53,6 +55,36 @@ def iter_request_files(root: Path) -> Iterable[Path]:
     yield from sorted(root.rglob("*_req.json"))
 
 
+_IDOU_ROUTE_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"^03(?:_.*)?_req\.json$"), "chkkeiyakuOver"),
+    (re.compile(r"^05(?:_.*)?_req\.json$"), "jissekicalc"),
+    (re.compile(r"^06(?:_.*)?_req\.json$"), "adjustget"),
+    (re.compile(r"^08(?:_.*)?_req\.json$"), "jissekiif"),
+    (re.compile(r"^09(?:_.*)?_req\.json$"), "jissekirep"),
+    (re.compile(r"^11(?:_.*)?_req\.json$"), "kekkarep"),
+    (re.compile(r"^15_1(?:_.*)?_req\.json$"), "meisaiif"),
+    # (re.compile(r"^15_2(?:_.*)?_req\.json$"), "meisairep"),
+    (re.compile(r"^15_2(?:_.*)?_req\.json$"), "meisaiif"),
+]
+
+
+def resolve_post_url(base_url: str, request_path: Path) -> str:
+    """Determine the downstream POST URL for a given request file."""
+
+    parts = urlsplit(base_url)
+    if "/idou/" not in parts.path:
+        return base_url
+
+    filename = request_path.name
+    for pattern, suffix in _IDOU_ROUTE_RULES:
+        print(f"Checking {filename} against pattern {pattern}")
+        if pattern.match(filename):
+            new_path = f"{parts.path.rstrip('/')}/{suffix}"
+            return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
+
+    return base_url
+
+
 def build_response_path(request_path: Path) -> Path:
     stem = request_path.stem
     if not stem.endswith("_req"):
@@ -92,7 +124,8 @@ def relay_requests(
     try:
         for request_path in iter_request_files(directory):
             payload = load_request_payload(request_path)
-            response = client.post(target_url, json=payload)
+            post_url = resolve_post_url(target_url, request_path)
+            response = client.post(post_url, json=payload)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:

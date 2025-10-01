@@ -16,9 +16,34 @@
             ],
             "jinja": true,
             "env": {
-                "ENGINE_TESTER_ROOT": "${workspaceFolder}"
+                "ENGINE_TESTER_ROOT": "${workspaceFolder}",
+                "PYTHONUTF8": "1",
+                "PYTHONIOENCODING": "utf-8",
+                "LANG": "ja_JP.UTF-8",
+                "LC_ALL": "ja_JP.UTF-8"
             },
             "console": "integratedTerminal"
+        },
+        {
+            "name": "FastAPI: Engine Tester (Debug Console)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "engine_tester.server:app",
+                "--host=0.0.0.0",
+                "--port=8000"
+            ],
+            "jinja": true,
+            "env": {
+                "ENGINE_TESTER_ROOT": "${workspaceFolder}",
+                "PYTHONUTF8": "1",
+                "PYTHONIOENCODING": "utf-8",
+                "LANG": "ja_JP.UTF-8",
+                "LC_ALL": "ja_JP.UTF-8"
+            },
+            "console": "internalConsole",
+            "internalConsoleOptions": "openOnSessionStart"
         }
     ]
 }
