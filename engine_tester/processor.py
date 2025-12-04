@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Set
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -50,9 +50,11 @@ def resolve_directory(directory: str | Path) -> Path:
 
 
 def iter_request_files(root: Path) -> Iterable[Path]:
-    """Yield request files (_req.json) under ``root`` and its subdirectories."""
+    """Yield request files (_req.json or _req3.json) under ``root`` and its subdirectories."""
 
-    yield from sorted(root.rglob("*_req.json"))
+    candidates: Set[Path] = set(root.rglob("*_req.json"))
+    candidates.update(root.rglob("*_req3.json"))
+    yield from sorted(candidates)
 
 
 _IDOU_ROUTE_RULES: list[tuple[re.Pattern[str], str]] = [
@@ -77,7 +79,6 @@ def resolve_post_url(base_url: str, request_path: Path) -> str:
 
     filename = request_path.name
     for pattern, suffix in _IDOU_ROUTE_RULES:
-        print(f"Checking {filename} against pattern {pattern}")
         if pattern.match(filename):
             new_path = f"{parts.path.rstrip('/')}/{suffix}"
             return urlunsplit((parts.scheme, parts.netloc, new_path, parts.query, parts.fragment))
@@ -87,10 +88,13 @@ def resolve_post_url(base_url: str, request_path: Path) -> str:
 
 def build_response_path(request_path: Path) -> Path:
     stem = request_path.stem
-    if not stem.endswith("_req"):
-        raise ProcessingError(f"File name does not end with '_req.json': {request_path}")
-    prefix = stem[:-4]
-    return request_path.with_name(f"{prefix}_res.json")
+    if stem.endswith("_req"):
+        prefix = stem[:-4]
+        return request_path.with_name(f"{prefix}_res.json")
+    if stem.endswith("_req3"):
+        prefix = stem[:-5]
+        return request_path.with_name(f"{prefix}_res3.json")
+    raise ProcessingError(f"File name does not end with '_req.json' or '_req3.json': {request_path}")
 
 
 def load_request_payload(path: Path) -> dict:
