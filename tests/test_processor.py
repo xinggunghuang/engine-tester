@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from engine_tester import processor
@@ -33,6 +34,34 @@ class FakeClient:
         pass
 
 
+class MixedFakeResponse:
+    def __init__(self, payload: dict | None = None, *, status_code: int = 200):
+        self._payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        if self._payload is None:
+            raise ValueError("not json")
+        return self._payload
+
+
+class MixedFakeClient:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def post(self, url: str, json: dict):  # type: ignore[override]
+        self.calls.append(json.get("id", "unknown"))
+        if json.get("id") == "bad":
+            return MixedFakeResponse(payload={"error": "downstream failed"}, status_code=500)
+        return MixedFakeResponse(payload={"ok": True})
+
+    def close(self) -> None:  # pragma: no cover - nothing to close
+        pass
+
+
 @pytest.fixture()
 def sample_structure(tmp_path: Path) -> Path:
     base = tmp_path / "データ"
@@ -55,12 +84,16 @@ def test_relay_requests_creates_response_files(sample_structure: Path) -> None:
     )
 
     assert summary.processed_count == 1
+    assert summary.succeeded_count == 1
+    assert summary.failed_count == 0
     assert client.calls[0]["url"] == "http://example.com/api"
     response_file = sample_structure / "レベル" / "深い" / "依頼_res.json"
     assert response_file.exists()
     saved_text = response_file.read_text(encoding="utf-8")
     assert json.loads(saved_text) == response_body
     assert saved_text.endswith("\n")
+    assert summary.execution_results[0].succeeded is True
+    assert summary.execution_results[0].response_path == response_file
 
 
 def test_relay_requests_adjusts_idou_routes(tmp_path: Path) -> None:
@@ -79,6 +112,8 @@ def test_relay_requests_adjusts_idou_routes(tmp_path: Path) -> None:
     )
 
     assert summary.processed_count == 1
+    assert summary.succeeded_count == 1
+    assert summary.failed_count == 0
     assert client.calls[0]["url"] == "http://example.com/idou/service/chkkeiyakuOver"
     saved = (directory / "03sample_res.json").read_text(encoding="utf-8")
     assert json.loads(saved)["result"] == "ok"
@@ -122,3 +157,28 @@ def test_resolve_directory_missing_path(tmp_path: Path) -> None:
     missing = tmp_path / "absent"
     with pytest.raises(processor.ProcessingError):
         processor.resolve_directory(missing)
+
+
+def test_relay_requests_reports_success_and_failure(tmp_path: Path) -> None:
+    directory = tmp_path / "requests"
+    directory.mkdir()
+    (directory / "01_ok_req.json").write_text(json.dumps({"id": "ok"}), encoding="utf-8")
+    (directory / "02_bad_req.json").write_text(json.dumps({"id": "bad"}), encoding="utf-8")
+
+    summary = processor.relay_requests(
+        target_url="http://example.com/api",
+        directory=directory,
+        client=MixedFakeClient(),
+    )
+
+    assert summary.succeeded_count == 1
+    assert summary.failed_count == 1
+    assert len(summary.execution_results) == 2
+    assert summary.processed_count == 2
+    assert any(result.succeeded for result in summary.execution_results)
+    assert any(not result.succeeded for result in summary.execution_results)
+
+    failed_response = directory / "02_bad_res.json"
+    assert failed_response.exists()
+    failed_payload = json.loads(failed_response.read_text(encoding="utf-8"))
+    assert failed_payload == {"error": "downstream failed"}

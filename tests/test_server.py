@@ -30,6 +30,15 @@ def test_process_directory_uses_query_parameters(tmp_path: Path, monkeypatch: py
             target_url=target_url,
             base_directory=directory,
             processed_files=[processed_file],
+            execution_results=[
+                processor.ExecutionResult(
+                    request_path=directory / "依頼_req.json",
+                    post_url=target_url,
+                    succeeded=True,
+                    response_path=directory / "依頼_res.json",
+                    message="Processed successfully",
+                )
+            ],
         )
 
     monkeypatch.setattr(server, "relay_requests", fake_relay)
@@ -44,5 +53,8 @@ def test_process_directory_uses_query_parameters(tmp_path: Path, monkeypatch: py
     assert body == {
         "status": "ok",
         "processed": 1,
+        "succeeded": 1,
+        "failed": 0,
         "responses": [(target_dir / "依頼_res.json").as_posix()],
+        "faild": [],
     }

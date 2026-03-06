@@ -25,10 +25,30 @@ class ProcessSummary:
     target_url: str
     base_directory: Path
     processed_files: List[ProcessedFile]
+    execution_results: List["ExecutionResult"]
 
     @property
     def processed_count(self) -> int:
         return len(self.processed_files)
+
+    @property
+    def succeeded_count(self) -> int:
+        return sum(1 for result in self.execution_results if result.succeeded)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for result in self.execution_results if not result.succeeded)
+
+
+@dataclass(slots=True)
+class ExecutionResult:
+    """Per-request execution outcome, including success and failure details."""
+
+    request_path: Path
+    post_url: str
+    succeeded: bool
+    response_path: Optional[Path] = None
+    message: Optional[str] = None
 
 
 class ProcessingError(RuntimeError):
@@ -58,15 +78,15 @@ def iter_request_files(root: Path) -> Iterable[Path]:
 
 
 _IDOU_ROUTE_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^03(?:_.*)?_req\.json$"), "chkkeiyakuOver"),
-    (re.compile(r"^05(?:_.*)?_req\.json$"), "jissekicalc"),
-    (re.compile(r"^06(?:_.*)?_req\.json$"), "adjustget"),
-    (re.compile(r"^08(?:_.*)?_req\.json$"), "jissekiif"),
-    (re.compile(r"^09(?:_.*)?_req\.json$"), "jissekirep"),
-    (re.compile(r"^11(?:_.*)?_req\.json$"), "kekkarep"),
-    (re.compile(r"^15_1(?:_.*)?_req\.json$"), "meisaiif"),
-    # (re.compile(r"^15_2(?:_.*)?_req\.json$"), "meisairep"),
-    (re.compile(r"^15_2(?:_.*)?_req\.json$"), "meisaiif"),
+    (re.compile(r"^03.*_req\.json$"), "chkkeiyakuOver"),
+    (re.compile(r"^05.*_req\.json$"), "jissekicalc"),
+    (re.compile(r"^06.*_req\.json$"), "adjustget"),
+    (re.compile(r"^08.*_req\.json$"), "jissekiif"),
+    (re.compile(r"^09.*_req\.json$"), "jissekirep"),
+    (re.compile(r"^11.*_req\.json$"), "kekkarep"),
+    (re.compile(r"^15_1.*_req\.json$"), "meisaiif"),
+    # (re.compile(r"^15_2.*_req\.json$"), "meisairep"),
+    (re.compile(r"^15_2.*_req\.json$"), "meisaiif"),
 ]
 
 
@@ -120,6 +140,7 @@ def relay_requests(
     client: Optional[httpx.Client] = None,
 ) -> ProcessSummary:
     processed: List[ProcessedFile] = []
+    execution_results: List[ExecutionResult] = []
 
     owns_client = client is None
     if client is None:
@@ -127,27 +148,82 @@ def relay_requests(
 
     try:
         for request_path in iter_request_files(directory):
-            payload = load_request_payload(request_path)
             post_url = resolve_post_url(target_url, request_path)
-            response = client.post(post_url, json=payload)
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                raise ProcessingError(
-                    f"Downstream server responded with status {exc.response.status_code}"
-                ) from exc
-
-            try:
-                response_payload = response.json()
-            except (json.JSONDecodeError, ValueError) as exc:
-                raise ProcessingError("Downstream response is not valid JSON") from exc
-
             response_path = build_response_path(request_path)
-            save_response_payload(response_path, response_payload)
+            wrote_response_file = False
+            try:
+                payload = load_request_payload(request_path)
+                response = client.post(post_url, json=payload)
 
-            processed.append(ProcessedFile(request_path=request_path, response_path=response_path))
+                try:
+                    response_payload = response.json()
+                    is_valid_json = True
+                except (json.JSONDecodeError, ValueError):
+                    # Preserve the exact downstream body when it isn't JSON.
+                    response_payload = {"raw_response": response.text}
+                    is_valid_json = False
+
+                save_response_payload(response_path, response_payload)
+                wrote_response_file = True
+
+                processed.append(ProcessedFile(request_path=request_path, response_path=response_path))
+                if response.status_code >= 400:
+                    execution_results.append(
+                        ExecutionResult(
+                            request_path=request_path,
+                            post_url=post_url,
+                            succeeded=False,
+                            response_path=response_path,
+                            message=f"Downstream server responded with status {response.status_code}",
+                        )
+                    )
+                elif not is_valid_json:
+                    execution_results.append(
+                        ExecutionResult(
+                            request_path=request_path,
+                            post_url=post_url,
+                            succeeded=False,
+                            response_path=response_path,
+                            message="Downstream response is not valid JSON",
+                        )
+                    )
+                else:
+                    execution_results.append(
+                        ExecutionResult(
+                            request_path=request_path,
+                            post_url=post_url,
+                            succeeded=True,
+                            response_path=response_path,
+                            message="Processed successfully",
+                        )
+                    )
+            except (ProcessingError, httpx.HTTPError) as exc:
+                if not wrote_response_file:
+                    save_response_payload(
+                        response_path,
+                        {
+                            "status": "failed",
+                            "request": request_path.as_posix(),
+                            "message": str(exc),
+                        },
+                    )
+                    processed.append(ProcessedFile(request_path=request_path, response_path=response_path))
+                execution_results.append(
+                    ExecutionResult(
+                        request_path=request_path,
+                        post_url=post_url,
+                        succeeded=False,
+                        response_path=response_path,
+                        message=str(exc),
+                    )
+                )
     finally:
         if owns_client:
             client.close()
 
-    return ProcessSummary(target_url=target_url, base_directory=directory, processed_files=processed)
+    return ProcessSummary(
+        target_url=target_url,
+        base_directory=directory,
+        processed_files=processed,
+        execution_results=execution_results,
+    )

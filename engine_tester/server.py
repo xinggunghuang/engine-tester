@@ -31,7 +31,10 @@ app = FastAPI(title="Engine Tester", version="0.1.0")
 class ProcessResponse(BaseModel):
     status: str
     processed: int
+    succeeded: int
+    failed: int
     responses: List[str]
+    faild: List[str]
 
 
 @app.get("/healthz")
@@ -60,4 +63,19 @@ async def process_directory(
         processed_file.response_path.as_posix() for processed_file in summary.processed_files
     ]
 
-    return ProcessResponse(status="ok", processed=summary.processed_count, responses=response_paths)
+    failed_requests = [
+        result.request_path.as_posix()
+        for result in summary.execution_results
+        if not result.succeeded
+    ]
+
+    status = "ok" if summary.failed_count == 0 else "partial_failed"
+
+    return ProcessResponse(
+        status=status,
+        processed=summary.processed_count,
+        succeeded=summary.succeeded_count,
+        failed=summary.failed_count,
+        responses=response_paths,
+        faild=failed_requests,
+    )
