@@ -74,19 +74,35 @@ def iter_request_files(root: Path) -> Iterable[Path]:
 
     candidates: Set[Path] = set(root.rglob("*_req.json"))
     candidates.update(root.rglob("*_req3.json"))
+    candidates.update(root.rglob("*_req03.json"))
+    candidates.update(root.rglob("*_req05.json"))
+    candidates.update(root.rglob("*_req06.json"))
+    candidates.update(root.rglob("*_req08.json"))
+    candidates.update(root.rglob("*_req09.json"))
+    candidates.update(root.rglob("*_req11.json"))
+    candidates.update(root.rglob("*_req15_1.json"))
+    candidates.update(root.rglob("*_req15_2.json"))
+    candidates.update(root.rglob("*_req15.json"))
     yield from sorted(candidates)
 
 
 _IDOU_ROUTE_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"^03.*_req\.json$"), "chkkeiyakuOver"),
+    (re.compile(r".*_req03\.json$"), "chkkeiyakuOver"),
     (re.compile(r"^05.*_req\.json$"), "jissekicalc"),
+    (re.compile(r".*_req05\.json$"), "jissekicalc"),
     (re.compile(r"^06.*_req\.json$"), "adjustget"),
+    (re.compile(r".*_req06\.json$"), "adjustget"),
     (re.compile(r"^08.*_req\.json$"), "jissekiif"),
+    (re.compile(r".*_req08\.json$"), "jissekiif"),
     (re.compile(r"^09.*_req\.json$"), "jissekirep"),
+    (re.compile(r".*_req09\.json$"), "jissekirep"),
     (re.compile(r"^11.*_req\.json$"), "kekkarep"),
+    (re.compile(r".*_req11\.json$"), "kekkarep"),
     (re.compile(r"^15_1.*_req\.json$"), "meisaiif"),
     # (re.compile(r"^15_2.*_req\.json$"), "meisairep"),
     (re.compile(r"^15_2.*_req\.json$"), "meisaiif"),
+    (re.compile(r".*_req15\.json$"), "meisaiif"),
 ]
 
 
@@ -108,13 +124,25 @@ def resolve_post_url(base_url: str, request_path: Path) -> str:
 
 def build_response_path(request_path: Path) -> Path:
     stem = request_path.stem
+
+    numbered_suffixes = ("03", "05", "06", "08", "09", "11", "15")
+    for suffix in numbered_suffixes:
+        req_suffix = f"_req{suffix}"
+        if stem.endswith(req_suffix):
+            prefix = stem[: -len(req_suffix)]
+            return request_path.with_name(f"{prefix}_res{suffix}.json")
+
     if stem.endswith("_req"):
         prefix = stem[:-4]
         return request_path.with_name(f"{prefix}_res.json")
     if stem.endswith("_req3"):
         prefix = stem[:-5]
         return request_path.with_name(f"{prefix}_res3.json")
-    raise ProcessingError(f"File name does not end with '_req.json' or '_req3.json': {request_path}")
+    raise ProcessingError(
+        "File name does not end with a supported request suffix "
+        "(_req, _req3, _req03, _req05, _req06, _req08, _req09, _req11, _req15): "
+        f"{request_path}"
+    )
 
 
 def load_request_payload(path: Path) -> dict:

@@ -148,6 +148,29 @@ def test_resolve_post_url_non_matching_suffix(tmp_path: Path) -> None:
     assert result == "http://example.com/idou/service"
 
 
+@pytest.mark.parametrize(
+    ("request_name", "expected_name"),
+    [
+        ("sample_req.json", "sample_res.json"),
+        ("sample_req3.json", "sample_res3.json"),
+        ("sample_req03.json", "sample_res03.json"),
+        ("sample_req05.json", "sample_res05.json"),
+        ("sample_req06.json", "sample_res06.json"),
+        ("sample_req08.json", "sample_res08.json"),
+        ("sample_req09.json", "sample_res09.json"),
+        ("sample_req11.json", "sample_res11.json"),
+        ("sample_req15.json", "sample_res15.json"),
+    ],
+)
+def test_build_response_path_supported_patterns(
+    tmp_path: Path,
+    request_name: str,
+    expected_name: str,
+) -> None:
+    request_path = tmp_path / request_name
+    assert processor.build_response_path(request_path) == (tmp_path / expected_name)
+
+
 def test_resolve_directory_accepts_absolute(tmp_path: Path) -> None:
     resolved = processor.resolve_directory(tmp_path)
     assert resolved == tmp_path.resolve()
